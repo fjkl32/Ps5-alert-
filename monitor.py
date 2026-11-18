@@ -67,7 +67,7 @@ def main():
     print(f"Estado anterior: {previous}")
     print(f"Estado atual: {status}")
 
-    if status == "AVAILABLE" and previous != "AVAILABLE":
+    send_alert("TESTE DE LIGAÇÃO - Discord")
         send_alert(status)
 
     with open(state_file, "w") as file:
