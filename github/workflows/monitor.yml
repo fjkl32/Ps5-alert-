@@ -3,7 +3,7 @@ name: Monitor PS5 GTA VI
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "2/5 * * * *"
   workflow_dispatch:
 
 permissions:
