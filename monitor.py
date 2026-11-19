@@ -93,7 +93,9 @@ def send_alert(area):
         WEBHOOK,
         data=data,
         headers={
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "User-Agent": "DiscordBot (https://github.com, 1.0)",
+            "Accept": "application/json"
         },
         method="POST"
     )
