@@ -2,8 +2,10 @@
 import os
 import re
 import json
+import time
 import urllib.request
 import urllib.error
+import http.client
 from html.parser import HTMLParser
 from html import unescape
 
@@ -33,18 +35,56 @@ def normalize(text):
 
 
 def get_page():
-    req = urllib.request.Request(
-        URL,
-        headers={
-            "User-Agent": "Mozilla/5.0"
-        }
-    )
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
+        "Connection": "close"
+    }
 
-    with urllib.request.urlopen(req, timeout=30) as response:
-        return response.read().decode(
-            "utf-8",
-            errors="replace"
-        )
+    last_error = None
+
+    for attempt in range(1, 6):
+        try:
+            print(f"Pedido à PlayStation: tentativa {attempt}/5")
+
+            req = urllib.request.Request(
+                URL,
+                headers=headers
+            )
+
+            with urllib.request.urlopen(req, timeout=45) as response:
+                html = response.read().decode(
+                    "utf-8",
+                    errors="replace"
+                )
+
+            if len(html) < 10000:
+                raise RuntimeError("Página recebida demasiado pequena.")
+
+            print(f"Página recebida: {len(html)} caracteres")
+            return html
+
+        except (
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            TimeoutError,
+            ConnectionError,
+            http.client.HTTPException,
+            OSError,
+            RuntimeError
+        ) as error:
+            last_error = error
+            print(f"Falha na tentativa {attempt}: {error}")
+
+            if attempt < 5:
+                wait = attempt * 10
+                print(f"Nova tentativa em {wait} segundos...")
+                time.sleep(wait)
+
+    raise RuntimeError(
+        f"Não foi possível obter a página após 5 tentativas: {last_error}"
+    )
 
 
 def extract_product_area(html):
@@ -64,11 +104,10 @@ def extract_product_area(html):
 
     if not positions:
         raise RuntimeError(
-            "Produto não encontrado na página."
+            "Produto não encontrado. Estado não será alterado."
         )
 
     target = normalize(TARGET_TEXT)
-
     candidates = []
 
     for position in positions:
@@ -82,8 +121,6 @@ def extract_product_area(html):
         if target in area:
             return area
 
-    # Se a mensagem já desapareceu, usar a primeira
-    # secção encontrada para comparar com o estado anterior.
     return candidates[0]
 
 
@@ -120,18 +157,8 @@ def send_alert(area):
         method="POST"
     )
 
-    try:
-        with urllib.request.urlopen(req, timeout=20) as response:
-            print("Notificação Discord:", response.status)
-
-    except urllib.error.HTTPError as e:
-        print("ERRO DISCORD:", e.code)
-        print("MOTIVO:", e.reason)
-        print(
-            "RESPOSTA:",
-            e.read().decode("utf-8", errors="replace")
-        )
-        raise
+    with urllib.request.urlopen(req, timeout=30) as response:
+        print("Notificação Discord:", response.status)
 
 
 def main():
@@ -160,7 +187,7 @@ def main():
         previous_status == "unavailable"
         and current_status == "changed"
     ):
-        print("A mensagem de indisponibilidade desapareceu!")
+        print("Alteração detetada!")
         send_alert(area)
 
     elif current_status == "unavailable":
