@@ -13,6 +13,7 @@ URL = "https://www.playstation.com/pt-pt/accessories/dualsense-wireless-controll
 WEBHOOK = os.environ["DISCORD_WEBHOOK_URL"]
 
 PRODUCT = "Comando sem fios DualSense® - Edição limitada Grand Theft Auto VI Black"
+TARGET_TEXT = "Não disponível para compra"
 
 
 class TextExtractor(HTMLParser):
@@ -27,61 +28,59 @@ class TextExtractor(HTMLParser):
 def get_page():
     req = urllib.request.Request(
         URL,
-        headers={
-            "User-Agent": "Mozilla/5.0"
-        }
+        headers={"User-Agent": "Mozilla/5.0"}
     )
 
     with urllib.request.urlopen(req, timeout=30) as response:
         return response.read().decode("utf-8", errors="replace")
 
 
+def normalize(text):
+    return re.sub(r"\s+", " ", unescape(text)).strip().lower()
+
+
 def extract_product_area(html):
     parser = TextExtractor()
     parser.feed(html)
 
-    text = unescape(" ".join(parser.parts))
-    text = re.sub(r"\s+", " ", text)
+    text = normalize(" ".join(parser.parts))
+    product = normalize(PRODUCT)
 
-    positions = [
-        m.start()
-        for m in re.finditer(
-            re.escape(PRODUCT),
-            text,
-            re.IGNORECASE
-        )
+    position = text.find(product)
+
+    if position == -1:
+        raise RuntimeError("Produto não encontrado na página.")
+
+    area = text[
+        max(0, position - 500):
+        position + 1500
     ]
 
-    if not positions:
+    if "84,99" not in area:
         raise RuntimeError(
-            "Não foi possível localizar o produto na página."
+            "Não foi possível confirmar a secção do produto."
         )
 
-    candidates = []
+    return area
 
-    for position in positions:
-        area = text[
-            max(0, position - 500):
-            position + 900
-        ]
 
-        if "84,99" in area:
-            candidates.append(area)
+def detect_status(area):
+    target = normalize(TARGET_TEXT)
 
-    if not candidates:
-        raise RuntimeError(
-            "Não foi possível identificar a secção do produto."
-        )
+    if target in area:
+        return "unavailable"
 
-    return candidates[0]
+    return "changed"
 
 
 def send_alert(area):
     message = (
-        "🔔 **Alteração na página do comando GTA VI Black!**\n"
-        "A secção do produto foi alterada. "
-        "Confirma se já podes reservar ou comprar.\n\n"
-        f"Trecho atualizado: {area[:1200]}\n\n"
+        "🔔 **ALTERAÇÃO DETETADA NO COMANDO GTA VI BLACK!**\n\n"
+        "O texto 'Não disponível para compra' deixou de aparecer "
+        "na secção do produto.\n\n"
+        "Isto pode indicar uma alteração na disponibilidade, "
+        "mas não confirma stock.\n\n"
+        f"Texto atual: {area[:1000]}\n\n"
         f"👉 {URL}"
     )
 
@@ -113,10 +112,6 @@ def send_alert(area):
         )
         raise
 
-    except urllib.error.URLError as e:
-        print("ERRO DE LIGAÇÃO AO DISCORD:", e.reason)
-        raise
-
 
 def main():
     print("A consultar a página PlayStation...")
@@ -124,30 +119,37 @@ def main():
     html = get_page()
     area = extract_product_area(html)
 
-    signature = hashlib.sha256(
-        area.encode("utf-8")
-    ).hexdigest()
+    current_status = detect_status(area)
 
     state_file = "state.txt"
 
     if os.path.exists(state_file):
         with open(state_file, "r") as file:
-            previous = file.read().strip()
+            previous_status = file.read().strip()
     else:
-        previous = ""
+        previous_status = ""
 
-    if not previous:
+    print("Estado atual:", current_status)
+    print("Estado anterior:", previous_status)
+
+    if not previous_status:
         print("Primeira verificação. Estado inicial guardado.")
 
-    elif signature != previous:
-        print("Alteração detetada!")
+    elif (
+        previous_status == "unavailable"
+        and current_status == "changed"
+    ):
+        print("O texto de indisponibilidade desapareceu!")
         send_alert(area)
 
+    elif current_status == "unavailable":
+        print("Produto continua com a mensagem de indisponibilidade.")
+
     else:
-        print("Sem alterações na secção do produto.")
+        print("O texto continua alterado. Sem nova notificação.")
 
     with open(state_file, "w") as file:
-        file.write(signature)
+        file.write(current_status)
 
 
 if __name__ == "__main__":
