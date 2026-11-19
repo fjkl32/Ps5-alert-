@@ -2,7 +2,6 @@
 import os
 import re
 import json
-import hashlib
 import urllib.request
 import urllib.error
 from html.parser import HTMLParser
@@ -25,18 +24,27 @@ class TextExtractor(HTMLParser):
         self.parts.append(data)
 
 
+def normalize(text):
+    return re.sub(
+        r"\s+",
+        " ",
+        unescape(text)
+    ).strip().lower()
+
+
 def get_page():
     req = urllib.request.Request(
         URL,
-        headers={"User-Agent": "Mozilla/5.0"}
+        headers={
+            "User-Agent": "Mozilla/5.0"
+        }
     )
 
     with urllib.request.urlopen(req, timeout=30) as response:
-        return response.read().decode("utf-8", errors="replace")
-
-
-def normalize(text):
-    return re.sub(r"\s+", " ", unescape(text)).strip().lower()
+        return response.read().decode(
+            "utf-8",
+            errors="replace"
+        )
 
 
 def extract_product_area(html):
@@ -46,28 +54,41 @@ def extract_product_area(html):
     text = normalize(" ".join(parser.parts))
     product = normalize(PRODUCT)
 
-    position = text.find(product)
-
-    if position == -1:
-        raise RuntimeError("Produto não encontrado na página.")
-
-    area = text[
-        max(0, position - 500):
-        position + 1500
+    positions = [
+        match.start()
+        for match in re.finditer(
+            re.escape(product),
+            text
+        )
     ]
 
-    if "84,99" not in area:
+    if not positions:
         raise RuntimeError(
-            "Não foi possível confirmar a secção do produto."
+            "Produto não encontrado na página."
         )
 
-    return area
+    target = normalize(TARGET_TEXT)
+
+    candidates = []
+
+    for position in positions:
+        area = text[
+            max(0, position - 1500):
+            position + 4000
+        ]
+
+        candidates.append(area)
+
+        if target in area:
+            return area
+
+    # Se a mensagem já desapareceu, usar a primeira
+    # secção encontrada para comparar com o estado anterior.
+    return candidates[0]
 
 
 def detect_status(area):
-    target = normalize(TARGET_TEXT)
-
-    if target in area:
+    if normalize(TARGET_TEXT) in area:
         return "unavailable"
 
     return "changed"
@@ -76,8 +97,8 @@ def detect_status(area):
 def send_alert(area):
     message = (
         "🔔 **ALTERAÇÃO DETETADA NO COMANDO GTA VI BLACK!**\n\n"
-        "O texto 'Não disponível para compra' deixou de aparecer "
-        "na secção do produto.\n\n"
+        "A mensagem 'Não disponível para compra' "
+        "deixou de aparecer na secção do produto.\n\n"
         "Isto pode indicar uma alteração na disponibilidade, "
         "mas não confirma stock.\n\n"
         f"Texto atual: {area[:1000]}\n\n"
@@ -139,11 +160,11 @@ def main():
         previous_status == "unavailable"
         and current_status == "changed"
     ):
-        print("O texto de indisponibilidade desapareceu!")
+        print("A mensagem de indisponibilidade desapareceu!")
         send_alert(area)
 
     elif current_status == "unavailable":
-        print("Produto continua com a mensagem de indisponibilidade.")
+        print("Continua indisponível.")
 
     else:
         print("O texto continua alterado. Sem nova notificação.")
